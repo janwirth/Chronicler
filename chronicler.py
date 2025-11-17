@@ -144,6 +144,9 @@ def on_key_press(key):
     """Handle keyboard events"""
     global cmd_pressed
 
+    # Log that we received a key press (for debugging)
+    NSLog(f"Key press received: {key}")
+
     if is_sensitive_context():
         return
 
@@ -316,6 +319,15 @@ class ChroniclerMenuBar(NSObject):
         open_item.setTarget_(self)
         menu.addItem_(open_item)
 
+        # Open System Settings for Input Monitoring
+        settings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Setup Permissions",
+            "openPermissions:",
+            ""
+        )
+        settings_item.setTarget_(self)
+        menu.addItem_(settings_item)
+
         # Separator
         menu.addItem_(NSMenuItem.separatorItem())
 
@@ -356,21 +368,57 @@ class ChroniclerMenuBar(NSObject):
         # Start keyboard listener in separate thread
         def start_keyboard():
             try:
-                with keyboard.Listener(on_press=on_key_press, on_release=on_key_release) as listener:
-                    self.keyboard_listener = listener
-                    listener.join()
+                NSLog("Starting keyboard listener...")
+                print("Starting keyboard listener...")
+
+                # Test if we can actually listen to keyboard
+                test_worked = False
+                def test_press(key):
+                    nonlocal test_worked
+                    test_worked = True
+                    return False  # Stop listener
+
+                # Try to start listener
+                NSLog("Creating keyboard listener...")
+                listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
+                self.keyboard_listener = listener
+                listener.start()
+
+                NSLog("Keyboard listener thread started")
+                print("Keyboard listener thread started")
+
+                # The listener will now run until the app quits
+                listener.join()
+
             except Exception as e:
-                NSLog(f"Keyboard listener error: {e}")
+                error_msg = f"Keyboard listener FAILED: {e}"
+                NSLog(error_msg)
+                print(error_msg)
+                import traceback
+                tb = traceback.format_exc()
+                NSLog(f"Traceback: {tb}")
+                print(f"Traceback: {tb}")
+
+                # Show alert to user
+                from AppKit import NSAlert
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_("Keyboard Logging Failed")
+                alert.setInformativeText_(f"Error: {e}\n\nPlease grant Input Monitoring permission in System Settings → Privacy & Security → Input Monitoring")
+                alert.runModal()
 
         keyboard_thread = Thread(target=start_keyboard, daemon=True)
         keyboard_thread.start()
 
-        print("Chronicler started")
-        NSLog("Chronicler started")
+        print("Chronicler started - check if keyboard listener starts")
+        NSLog("Chronicler started - check if keyboard listener starts")
 
     def openChronicler_(self, sender):
         """Open Chronicler folder in Finder"""
         subprocess.run(["open", str(CHRONICLES_DIR)])
+
+    def openPermissions_(self, sender):
+        """Open System Settings to Input Monitoring"""
+        subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
 
     def applicationWillTerminate_(self, notification):
         """Clean up on quit"""
@@ -388,8 +436,64 @@ class ChroniclerMenuBar(NSObject):
         pass
 
 
+def check_accessibility_permission():
+    """Check if we have accessibility/input monitoring permission"""
+    try:
+        from ApplicationServices import (
+            AXIsProcessTrusted,
+            AXIsProcessTrustedWithOptions,
+            kAXTrustedCheckOptionPrompt
+        )
+        from CoreFoundation import CFDictionaryCreate, kCFBooleanTrue
+
+        # Check if we're trusted (have accessibility permission)
+        trusted = AXIsProcessTrusted()
+
+        if not trusted:
+            print("App does not have Accessibility permission")
+            NSLog("App does not have Accessibility permission - requesting...")
+
+            # Request permission (this will show the system prompt)
+            options = CFDictionaryCreate(
+                None,
+                [kAXTrustedCheckOptionPrompt],
+                [kCFBooleanTrue],
+                1,
+                None,
+                None
+            )
+            AXIsProcessTrustedWithOptions(options)
+            return False
+        else:
+            print("App has Accessibility permission")
+            NSLog("App has Accessibility permission")
+            return True
+    except Exception as e:
+        print(f"Error checking accessibility permission: {e}")
+        NSLog(f"Error checking accessibility permission: {e}")
+        return False
+
+
 def main():
     """Main entry point"""
+
+    # Check permissions BEFORE creating the app
+    print("Checking accessibility permission...")
+    has_permission = check_accessibility_permission()
+
+    if not has_permission:
+        print("\n" + "="*60)
+        print("PERMISSION REQUIRED")
+        print("="*60)
+        print("\nChronicler needs Accessibility permission to log keyboard input.")
+        print("\nA system dialog should have appeared asking for permission.")
+        print("If not, please:")
+        print("  1. Go to System Settings → Privacy & Security → Accessibility")
+        print("  2. Click the '+' button")
+        print("  3. Navigate to and select: Chronicler.app")
+        print("  4. Toggle it ON")
+        print("  5. Restart Chronicler")
+        print("\n" + "="*60 + "\n")
 
     # Create app first
     app = NSApplication.sharedApplication()
