@@ -2,6 +2,24 @@
 
 A simple background service that chronicles your work by logging keyboard input, clipboard content, application usage, and periodic screenshots. All data is stored in `~/chronicles` as a git repository in human-readable markdown format.
 
+## Why Chronicle Your Digital Life?
+
+> "I have run a keyboard logger, what is the active window and take a screenshot of a window of my machine every 10 minutes, and archive this going on 15 years now... I would never imagined this ends up being as valuable as it is."
+>
+> — Tobi Lütke, CEO of Shopify ([Acquired Podcast](https://www.acquired.fm/episodes/how-to-live-in-everyone-elses-future-with-shopify-ceo-tobi-lutke))
+
+Tobi Lütke has been logging his digital activity for over 15 years, creating an unprecedented personal archive. This practice has proven invaluable for:
+
+- **Understanding how you spend your time** - Tracking transitions between activities (programming → fundraising → strategic work)
+- **Observing belief evolution** - Seeing how your thinking changes over time on key issues
+- **Creating a source of truth** - A moment-by-moment archive of how decisions were actually made
+- **AI-powered insights** - Modern AI can analyze this data to create clean timelines and patterns
+- **Overcoming narrative bias** - The brain optimizes for narrative consistency rather than chronological accuracy; having raw data helps you see what actually happened
+
+As AI tools improve, having a comprehensive personal archive becomes increasingly valuable. You can use it to train AI models on your working style, recover context from years past, and create a genuine historical record of your personal and professional development.
+
+This tool makes it easy to start building your own chronicle.
+
 ## Features
 
 - Global keyboard input logging (intercepts all keypresses)
