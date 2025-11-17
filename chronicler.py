@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Chronicles - Personal Activity Logger
+Chronicler - Personal Activity Logger
 Logs keyboard input, clipboard, app activity, and screenshots to ~/chronicles
 """
 
@@ -288,7 +288,7 @@ def signal_handler(sig, frame):
 
 
 # Menu bar app delegate
-class ChroniclesMenuBar(NSObject):
+class ChroniclerMenuBar(NSObject):
     statusbar = None
     keyboard_listener = None
 
@@ -302,10 +302,10 @@ class ChroniclesMenuBar(NSObject):
         # Create menu
         menu = NSMenu.alloc().init()
 
-        # Open Chronicles folder
+        # Open Chronicler folder
         open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Open Chronicles",
-            "openChronicles:",
+            "Open Chronicler",
+            "openChronicler:",
             ""
         )
         open_item.setTarget_(self)
@@ -316,7 +316,7 @@ class ChroniclesMenuBar(NSObject):
 
         # Quit item
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit Chronicles",
+            "Quit Chronicler",
             "terminate:",
             ""
         )
@@ -347,11 +347,11 @@ class ChroniclesMenuBar(NSObject):
         keyboard_thread = Thread(target=start_keyboard, daemon=True)
         keyboard_thread.start()
 
-        print("Chronicles started")
-        NSLog("Chronicles started")
+        print("Chronicler started")
+        NSLog("Chronicler started")
 
-    def openChronicles_(self, sender):
-        """Open Chronicles folder in Finder"""
+    def openChronicler_(self, sender):
+        """Open Chronicler folder in Finder"""
         subprocess.run(["open", str(CHRONICLES_DIR)])
 
     def applicationWillTerminate_(self, notification):
@@ -375,7 +375,7 @@ def main():
 
     # Create app first
     app = NSApplication.sharedApplication()
-    delegate = ChroniclesMenuBar.alloc().init()
+    delegate = ChroniclerMenuBar.alloc().init()
     app.setDelegate_(delegate)
 
     # Install signal handlers that actually work with NSApplication

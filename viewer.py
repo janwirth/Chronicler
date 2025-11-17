@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Chronicles Viewer - Display activity logs in markdown format
+Chronicler Viewer - Display activity logs in markdown format
 """
 
 import sys

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Build Chronicles.app bundle for macOS
+# Build Chronicler.app bundle for macOS
 
 set -e
 
-APP_NAME="Chronicles"
+APP_NAME="Chronicler"
 BUNDLE_DIR="dist/${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -45,7 +45,7 @@ rm -rf icon.iconset
 echo "Creating launcher..."
 cat > "${MACOS_DIR}/${APP_NAME}" << 'EOF'
 #!/bin/bash
-# Chronicles launcher script
+# Chronicler launcher script
 
 # Get the directory where the app is located
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -89,9 +89,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << EOF
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Chronicles needs to monitor keyboard input to log your activity.</string>
+    <string>Chronicler needs to monitor keyboard input to log your activity.</string>
     <key>NSSystemAdministrationUsageDescription</key>
-    <string>Chronicles needs accessibility access to monitor keyboard input across all applications.</string>
+    <string>Chronicler needs accessibility access to monitor keyboard input across all applications.</string>
 </dict>
 </plist>
 EOF
@@ -111,11 +111,11 @@ echo "✓ Build complete: ${BUNDLE_DIR}"
 echo ""
 echo "IMPORTANT: To fix permission prompts:"
 echo "1. Go to System Settings → Privacy & Security"
-echo "2. Remove any existing 'Chronicles' entries from:"
+echo "2. Remove any existing 'Chronicler' entries from:"
 echo "   - Accessibility"
 echo "   - Screen Recording"
 echo "3. Launch the app: open ${BUNDLE_DIR}"
 echo "4. Grant permissions when prompted (ONE TIME only)"
 echo ""
 echo "To add to Login Items:"
-echo "  System Settings → General → Login Items → Click '+' → Add Chronicles.app"
+echo "  System Settings → General → Login Items → Click '+' → Add Chronicler.app"
