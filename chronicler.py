@@ -134,10 +134,10 @@ def start_new_session(app_name, window_title):
         "clipboard_items": []
     }
 
-    # Log application focus event
+    # Log application switch event
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         timestamp = datetime.now().strftime('%H:%M:%S')
-        f.write(f"**[{timestamp}] Focused: {app_name}**\n\n")
+        f.write(f"**[{timestamp}] {app_name}**\n\n")
 
 
 def on_key_press(key):
@@ -228,15 +228,20 @@ def take_screenshot():
         # Use screencapture command for better quality
         result = subprocess.run(
             ['screencapture', '-x', '-C', str(filename)],
-            capture_output=True
+            capture_output=True,
+            text=True
         )
 
         if result.returncode == 0 and filename.exists():
+            print(f"Screenshot saved: {filename}")
             return filename
         else:
+            print(f"Screenshot failed: returncode={result.returncode}, stderr={result.stderr}")
+            NSLog(f"Screenshot failed: returncode={result.returncode}, stderr={result.stderr}")
             return None
     except Exception as e:
         print(f"Screenshot error: {e}")
+        NSLog(f"Screenshot error: {e}")
         return None
 
 
@@ -326,6 +331,19 @@ class ChroniclerMenuBar(NSObject):
 
         # Start logging threads
         setup_chronicles_dir()
+
+        # Take initial screenshot to confirm app is working
+        global last_screenshot_time
+        print("Taking initial screenshot...")
+        NSLog("Taking initial screenshot...")
+        initial_screenshot = take_screenshot()
+        if initial_screenshot:
+            last_screenshot_time = time.time()
+            print(f"Initial screenshot saved: {initial_screenshot}")
+            NSLog(f"Initial screenshot saved: {initial_screenshot}")
+        else:
+            print("Initial screenshot failed - check Screen Recording permissions")
+            NSLog("Initial screenshot failed - check Screen Recording permissions")
 
         clipboard_thread = Thread(target=monitor_clipboard, daemon=True)
         screenshot_thread = Thread(target=screenshot_loop, daemon=True)

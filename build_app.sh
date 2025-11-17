@@ -19,11 +19,19 @@ mkdir -p "${RESOURCES_DIR}"
 # Copy Python script
 echo "Copying application files..."
 cp chronicler.py "${MACOS_DIR}/"
-cp viewer.py "${MACOS_DIR}/"
 
 # Copy virtual environment
 echo "Copying Python dependencies..."
 cp -r venv "${RESOURCES_DIR}/"
+
+# Copy the actual Python framework binary to have our own identity
+echo "Creating bundled Python executable..."
+PYTHON_FRAMEWORK="/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+if [ -f "$PYTHON_FRAMEWORK" ]; then
+    cp "$PYTHON_FRAMEWORK" "${MACOS_DIR}/ChroniclerPython"
+else
+    echo "Warning: Could not find Python framework binary"
+fi
 
 # Convert PNG to ICNS (macOS icon format)
 echo "Converting icon..."
@@ -41,23 +49,9 @@ sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
 iconutil -c icns icon.iconset -o "${RESOURCES_DIR}/${APP_NAME}.icns"
 rm -rf icon.iconset
 
-# Create launcher script
-echo "Creating launcher..."
-cat > "${MACOS_DIR}/${APP_NAME}" << 'EOF'
-#!/bin/bash
-# Chronicler launcher script
-
-# Get the directory where the app is located
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-RESOURCES_DIR="${DIR}/../Resources"
-
-# Use the bundled Python virtual environment
-export PATH="${RESOURCES_DIR}/venv/bin:$PATH"
-
-# Run the chronicler
-cd "${DIR}"
-exec python3 chronicler.py
-EOF
+# Compile C launcher
+echo "Compiling launcher..."
+gcc -o "${MACOS_DIR}/${APP_NAME}" launcher.c
 
 chmod +x "${MACOS_DIR}/${APP_NAME}"
 
@@ -85,7 +79,7 @@ cat > "${CONTENTS_DIR}/Info.plist" << EOF
     <key>LSMinimumSystemVersion</key>
     <string>10.14</string>
     <key>LSUIElement</key>
-    <false/>
+    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
@@ -99,12 +93,25 @@ EOF
 # Create PkgInfo
 echo -n "APPL????" > "${CONTENTS_DIR}/PkgInfo"
 
-# Ad-hoc code signing (self-signed) for stable identity
+# Ad-hoc code signing with stable identifier for permissions
 echo "Signing app bundle..."
-codesign --force --deep --sign - "${BUNDLE_DIR}" 2>/dev/null || echo "Warning: Could not sign app (this is OK for testing)"
+# Sign the Python binary first with our identifier
+if [ -f "${MACOS_DIR}/ChroniclerPython" ]; then
+    codesign --force --sign - --identifier "com.chronicles.logger.python" "${MACOS_DIR}/ChroniclerPython" 2>/dev/null || echo "Warning: Could not sign Python binary"
+fi
+# Sign the launcher
+codesign --force --sign - --identifier "com.chronicles.logger" "${MACOS_DIR}/Chronicler" 2>/dev/null || echo "Warning: Could not sign launcher"
+# Sign the whole bundle
+codesign --force --deep --sign - --identifier "com.chronicles.logger" "${BUNDLE_DIR}" 2>/dev/null || echo "Warning: Could not sign bundle"
 
 # Set extended attributes to mark as safe
 xattr -cr "${BUNDLE_DIR}"
+
+# Touch the app to update icon cache
+touch "${BUNDLE_DIR}"
+
+# Kill icon cache to force refresh
+killall Finder 2>/dev/null || true
 
 echo ""
 echo "✓ Build complete: ${BUNDLE_DIR}"

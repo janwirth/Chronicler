@@ -45,13 +45,6 @@ open dist/Chronicler.app
 2. Click '+' and add: `dist/Chronicler.app`
 3. Chronicler will now start automatically on login
 
-## View Logs
-
-```bash
-source venv/bin/activate
-python viewer.py
-```
-
 ## Data Location
 
 All logs stored in: `~/chronicles/`
