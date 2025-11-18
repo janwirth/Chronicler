@@ -172,13 +172,19 @@ def on_key_press(key):
             elif key == keyboard.Key.tab:
                 current_session["typed"].append("\t")
             elif key == keyboard.Key.backspace:
-                if cmd_pressed:
-                    # CMD+Backspace - skip recording this combination
-                    pass
-                else:
-                    # Regular backspace
-                    if current_session["typed"]:
-                        current_session["typed"].pop()
+                # Log backspace as arrow symbol instead of removing characters
+                current_session["typed"].append("←")
+            elif key == keyboard.Key.delete:
+                # Log delete key
+                current_session["typed"].append("⌦")
+            elif key == keyboard.Key.left:
+                current_session["typed"].append("◀")
+            elif key == keyboard.Key.right:
+                current_session["typed"].append("▶")
+            elif key == keyboard.Key.up:
+                current_session["typed"].append("▲")
+            elif key == keyboard.Key.down:
+                current_session["typed"].append("▼")
         except Exception as e:
             pass
 
