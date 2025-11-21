@@ -14,6 +14,8 @@ from pathlib import Path
 from threading import Thread, Lock
 import signal
 import objc
+import ctypes
+import ctypes.util
 
 from pynput import keyboard
 from AppKit import (NSWorkspace, NSPasteboard, NSApplication, NSMenu, NSMenuItem,
@@ -25,9 +27,9 @@ from PIL import Image
 
 # Configuration
 CHRONICLES_DIR = Path.home() / "chronicles"
-LOG_FILE = CHRONICLES_DIR / f"log_{datetime.now().strftime('%Y-%m-%d')}.md"
 SCREENSHOT_DIR = CHRONICLES_DIR / "screenshots"
 SCREENSHOT_INTERVAL = 600  # 10 minutes
+FLUSH_INTERVAL = 30  # Flush logs every 30 seconds
 
 # Password-related apps to skip
 SENSITIVE_APPS = {
@@ -50,6 +52,68 @@ running = True
 cmd_pressed = False
 
 
+def get_log_file():
+    """Get the log file for the current day (dynamic)"""
+    return CHRONICLES_DIR / f"log_{datetime.now().strftime('%Y-%m-%d')}.md"
+
+
+def ensure_log_file_frontmatter(log_file):
+    """Ensure log file exists with markwhen frontmatter"""
+    if not log_file.exists():
+        today = datetime.now()
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("---\n")
+            f.write(f"title: Activity Log - {today.strftime('%Y-%m-%d')}\n")
+            f.write(f"date: {today.strftime('%Y-%m-%d')}\n")
+            f.write("---\n\n")
+
+
+def parse_last_event(log_file):
+    """Parse the last event from the log file to get the focused program"""
+    if not log_file.exists():
+        return None
+    
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        # Skip frontmatter if present
+        start_idx = 0
+        if lines and lines[0].strip() == "---":
+            for i, line in enumerate(lines[1:], 1):
+                if line.strip() == "---":
+                    start_idx = i + 1
+                    break
+        
+        # Look for last event (markwhen format: YYYY-MM-DDTHH:MM:SS: App Name)
+        # or old format: # App Name - (HH:MM:SS)
+        last_app = None
+        for i in range(len(lines) - 1, start_idx - 1, -1):
+            line = lines[i].strip()
+            # Check for markwhen format: YYYY-MM-DDTHH:MM:SS: App Name
+            if ":" in line and ("T" in line or line.startswith("#")):
+                # Try to parse markwhen format
+                if "T" in line:
+                    parts = line.split(":", 1)
+                    if len(parts) == 2:
+                        last_app = parts[1].strip()
+                        break
+                # Try old format: # App Name - (HH:MM:SS)
+                elif line.startswith("#"):
+                    # Extract app name from "# App Name - (HH:MM:SS)"
+                    app_part = line[1:].strip()
+                    if " - (" in app_part:
+                        last_app = app_part.split(" - (")[0].strip()
+                    else:
+                        last_app = app_part
+                    break
+        
+        return last_app
+    except Exception as e:
+        NSLog(f"Error parsing last event: {e}")
+        return None
+
+
 def setup_chronicles_dir():
     """Set up the chronicles directory and git repo"""
     CHRONICLES_DIR.mkdir(exist_ok=True)
@@ -63,11 +127,9 @@ def setup_chronicles_dir():
         subprocess.run(["git", "add", ".gitignore"], cwd=CHRONICLES_DIR, capture_output=True)
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=CHRONICLES_DIR, capture_output=True)
 
-    # Create log file with header if it doesn't exist
-    if not LOG_FILE.exists():
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write(f"# Activity Log - {datetime.now().strftime('%Y-%m-%d')}\n\n")
-            f.write("This file contains a chronological log of keyboard activity, clipboard events, and screenshots.\n\n")
+    # Ensure log file exists with frontmatter
+    log_file = get_log_file()
+    ensure_log_file_frontmatter(log_file)
 
 
 def get_active_app():
@@ -98,26 +160,109 @@ def is_sensitive_context():
     return False
 
 
-def save_session():
-    """Save the current session to log file in simplified markdown format"""
+def is_system_sleeping():
+    """Check if the system is sleeping or idle using IOKit"""
+    try:
+        # Load IOKit framework
+        iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library('IOKit'))
+
+        # Get IOKit registry entry for power management
+        # Function signatures
+        iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        iokit.IOServiceGetMatchingService.restype = ctypes.c_void_p
+        iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
+        iokit.IOServiceMatching.restype = ctypes.c_void_p
+        iokit.IORegistryEntryCreateCFProperty.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32]
+        iokit.IORegistryEntryCreateCFProperty.restype = ctypes.c_void_p
+        iokit.IOObjectRelease.argtypes = [ctypes.c_void_p]
+
+        # Alternative approach: Check system idle time using CG
+        idle_time = CG.CGEventSourceSecondsSinceLastEventType(
+            CG.kCGEventSourceStateHIDSystemState,
+            CG.kCGAnyInputEventType
+        )
+
+        # If system has been idle for more than 5 minutes, consider it sleeping/idle
+        # This threshold can be adjusted based on preference
+        IDLE_THRESHOLD = 300  # 5 minutes in seconds
+
+        if idle_time > IDLE_THRESHOLD:
+            NSLog(f"System idle for {idle_time:.0f} seconds - skipping screenshot")
+            return True
+
+        return False
+
+    except Exception as e:
+        NSLog(f"Error checking system sleep state: {e}")
+        # If we can't determine, assume system is awake (fail-safe)
+        return False
+
+
+def append_or_create_event(app_name, typed_content, timestamp):
+    """Append to last event if same app, otherwise create new entry.
+    Always uses the current day's log file."""
+    # Always get the current day's file (handles day transitions)
+    log_file = get_log_file()
+    ensure_log_file_frontmatter(log_file)
+    
+    last_app = parse_last_event(log_file)
+    
+    # Format timestamp in markwhen format: YYYY-MM-DDTHH:MM:SS
+    timestamp_str = timestamp.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            if last_app == app_name:
+                # Append to existing entry
+                if typed_content.strip():
+                    f.write(typed_content)
+            else:
+                # Create new entry
+                f.write(f"{timestamp_str}: {app_name}\n")
+                if typed_content.strip():
+                    f.write(f"{typed_content}\n")
+                f.write("\n")
+    except Exception as e:
+        NSLog(f"Error writing to log file {log_file}: {e}")
+
+
+def save_session(flush_typed=True):
+    """Save the current session to log file in markwhen format"""
     global current_session
 
     if not current_session["app"]:
         return
 
+    # Always get the current day's log file (handles day transitions)
+    log_file = get_log_file()
+    ensure_log_file_frontmatter(log_file)
+
     with data_lock:
         timestamp_start = datetime.fromisoformat(current_session["start_time"])
-
-        # Write simplified markdown format
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"# {current_session['app']} - ({timestamp_start.strftime('%H:%M:%S')})\n")
-
-            # Write typed content if any
-            typed_content = "".join(current_session["typed"])
-            if typed_content.strip():
-                f.write(f"{typed_content}\n")
-
-            f.write("\n")
+        
+        # Check if day has changed - if so, start new session
+        current_day = datetime.now().strftime('%Y-%m-%d')
+        session_day = timestamp_start.strftime('%Y-%m-%d')
+        
+        if current_day != session_day:
+            # Day changed, start fresh session for new day
+            current_session = {
+                "app": current_session["app"],  # Keep current app
+                "window": current_session.get("window"),
+                "start_time": datetime.now().isoformat(),
+                "typed": current_session["typed"],  # Keep any pending typed content
+                "clipboard_items": []
+            }
+            timestamp_start = datetime.now()
+        
+        # Get typed content
+        typed_content = "".join(current_session["typed"])
+        
+        if flush_typed and typed_content:
+            # Append or create event (always uses current day's file)
+            append_or_create_event(current_session["app"], typed_content, timestamp_start)
+            # Clear typed content after flushing
+            current_session["typed"] = []
 
 
 def start_new_session(app_name, window_title):
@@ -134,18 +279,10 @@ def start_new_session(app_name, window_title):
         "clipboard_items": []
     }
 
-    # Log application switch event
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        f.write(f"**[{timestamp}] {app_name}**\n\n")
-
 
 def on_key_press(key):
     """Handle keyboard events"""
     global cmd_pressed
-
-    # Log that we received a key press (for debugging)
-    NSLog(f"Key press received: {key}")
 
     if is_sensitive_context():
         return
@@ -186,7 +323,7 @@ def on_key_press(key):
             elif key == keyboard.Key.down:
                 current_session["typed"].append("▼")
         except Exception as e:
-            pass
+            NSLog(f"Error in on_key_press: {e}")
 
 
 def on_key_release(key):
@@ -261,23 +398,40 @@ def screenshot_loop():
     while running:
         current_time = time.time()
         if current_time - last_screenshot_time >= SCREENSHOT_INTERVAL:
-            filename = take_screenshot()
-            if filename:
+            # Check if system is sleeping/idle before taking screenshot
+            if not is_system_sleeping():
+                filename = take_screenshot()
+                if filename:
+                    last_screenshot_time = current_time
+                    # Log screenshot in current session
+                    with data_lock:
+                        if current_session["app"]:
+                            current_session["clipboard_items"].append({
+                                "timestamp": datetime.now().isoformat(),
+                                "screenshot": str(filename)
+                            })
+            else:
+                # System is sleeping/idle, skip screenshot but reset timer to check again soon
+                NSLog("Skipping screenshot - system is idle/sleeping")
+                print("Skipping screenshot - system is idle/sleeping")
                 last_screenshot_time = current_time
-                # Log screenshot in current session
-                with data_lock:
-                    if current_session["app"]:
-                        current_session["clipboard_items"].append({
-                            "timestamp": datetime.now().isoformat(),
-                            "screenshot": str(filename)
-                        })
         time.sleep(10)  # Check every 10 seconds
+
+
+def flush_logs():
+    """Periodically flush logs to ensure continuous writing"""
+    while running:
+        time.sleep(FLUSH_INTERVAL)
+        try:
+            save_session(flush_typed=True)
+        except Exception as e:
+            NSLog(f"Error flushing logs: {e}")
 
 
 def commit_to_git():
     """Periodically commit logs to git"""
     while running:
-        time.sleep(5)  # Commit every 5 seconds
+        time.sleep(300)  # Commit every 5 minutes (less frequent)
         try:
             subprocess.run(["git", "add", "."], cwd=CHRONICLES_DIR, capture_output=True)
             commit_msg = f"Chronicle update {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -366,57 +520,80 @@ class ChroniclerMenuBar(NSObject):
         clipboard_thread = Thread(target=monitor_clipboard, daemon=True)
         screenshot_thread = Thread(target=screenshot_loop, daemon=True)
         git_thread = Thread(target=commit_to_git, daemon=True)
+        flush_thread = Thread(target=flush_logs, daemon=True)
 
         clipboard_thread.start()
         screenshot_thread.start()
         git_thread.start()
+        flush_thread.start()
 
-        # Start keyboard listener in separate thread
+        # Start keyboard listener with error recovery
         def start_keyboard():
-            try:
-                NSLog("Starting keyboard listener...")
-                print("Starting keyboard listener...")
+            retry_count = 0
+            max_retries = 10
+            
+            while running and retry_count < max_retries:
+                try:
+                    print("Starting keyboard listener...")
+                    NSLog("Starting keyboard listener...")
 
-                # Test if we can actually listen to keyboard
-                test_worked = False
-                def test_press(key):
-                    nonlocal test_worked
-                    test_worked = True
-                    return False  # Stop listener
+                    # Create listener
+                    listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
+                    self.keyboard_listener = listener
+                    listener.start()
 
-                # Try to start listener
-                NSLog("Creating keyboard listener...")
-                listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
-                self.keyboard_listener = listener
-                listener.start()
+                    print("Keyboard listener started")
+                    NSLog("Keyboard listener started")
 
-                NSLog("Keyboard listener thread started")
-                print("Keyboard listener thread started")
+                    # The listener will now run until it fails or app quits
+                    listener.join()
+                    
+                    # If we get here, listener stopped
+                    if running:
+                        retry_count += 1
+                        error_msg = f"Keyboard listener stopped unexpectedly (attempt {retry_count}/{max_retries})"
+                        NSLog(error_msg)
+                        print(error_msg)
+                        
+                        if retry_count < max_retries:
+                            # Wait before retrying
+                            time.sleep(5)
+                        else:
+                            # Show alert after max retries
+                            from AppKit import NSAlert
+                            alert = NSAlert.alloc().init()
+                            alert.setMessageText_("Keyboard Logging Failed")
+                            alert.setInformativeText_("Keyboard listener stopped multiple times. Please check Input Monitoring permissions in System Settings.")
+                            alert.runModal()
+                            break
 
-                # The listener will now run until the app quits
-                listener.join()
+                except Exception as e:
+                    retry_count += 1
+                    error_msg = f"Keyboard listener FAILED (attempt {retry_count}/{max_retries}): {e}"
+                    NSLog(error_msg)
+                    print(error_msg)
+                    import traceback
+                    tb = traceback.format_exc()
+                    NSLog(f"Traceback: {tb}")
+                    print(f"Traceback: {tb}")
 
-            except Exception as e:
-                error_msg = f"Keyboard listener FAILED: {e}"
-                NSLog(error_msg)
-                print(error_msg)
-                import traceback
-                tb = traceback.format_exc()
-                NSLog(f"Traceback: {tb}")
-                print(f"Traceback: {tb}")
-
-                # Show alert to user
-                from AppKit import NSAlert
-                alert = NSAlert.alloc().init()
-                alert.setMessageText_("Keyboard Logging Failed")
-                alert.setInformativeText_(f"Error: {e}\n\nPlease grant Input Monitoring permission in System Settings → Privacy & Security → Input Monitoring")
-                alert.runModal()
+                    if retry_count >= max_retries:
+                        # Show alert to user
+                        from AppKit import NSAlert
+                        alert = NSAlert.alloc().init()
+                        alert.setMessageText_("Keyboard Logging Failed")
+                        alert.setInformativeText_(f"Error: {e}\n\nPlease grant Input Monitoring permission in System Settings → Privacy & Security → Input Monitoring")
+                        alert.runModal()
+                        break
+                    else:
+                        # Wait before retrying
+                        time.sleep(5)
 
         keyboard_thread = Thread(target=start_keyboard, daemon=True)
         keyboard_thread.start()
 
-        print("Chronicler started - check if keyboard listener starts")
-        NSLog("Chronicler started - check if keyboard listener starts")
+        print("Chronicler started")
+        NSLog("Chronicler started")
 
     def openChronicler_(self, sender):
         """Open Chronicler folder in Finder"""
