@@ -24,6 +24,7 @@ from Foundation import NSObject, NSLog
 from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID
 import Quartz.CoreGraphics as CG
 from PIL import Image
+from markwhen_parser import MarkwhenParser
 
 # Configuration
 CHRONICLES_DIR = Path.home() / "chronicles"
@@ -51,6 +52,9 @@ data_lock = Lock()
 running = True
 cmd_pressed = False
 
+# Markwhen parser instance
+markwhen_parser = MarkwhenParser()
+
 
 def get_log_file():
     """Get the log file for the current day (dynamic)"""
@@ -59,56 +63,16 @@ def get_log_file():
 
 def ensure_log_file_frontmatter(log_file):
     """Ensure log file exists with markwhen frontmatter"""
-    if not log_file.exists():
-        today = datetime.now()
-        with open(log_file, "w", encoding="utf-8") as f:
-            f.write("---\n")
-            f.write(f"title: Activity Log - {today.strftime('%Y-%m-%d')}\n")
-            f.write(f"date: {today.strftime('%Y-%m-%d')}\n")
-            f.write("---\n\n")
+    today = datetime.now()
+    title = f"Activity Log - {today.strftime('%Y-%m-%d')}"
+    date = today.strftime('%Y-%m-%d')
+    markwhen_parser.ensure_frontmatter(log_file, title=title, date=date)
 
 
 def parse_last_event(log_file):
     """Parse the last event from the log file to get the focused program"""
-    if not log_file.exists():
-        return None
-    
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        # Skip frontmatter if present
-        start_idx = 0
-        if lines and lines[0].strip() == "---":
-            for i, line in enumerate(lines[1:], 1):
-                if line.strip() == "---":
-                    start_idx = i + 1
-                    break
-        
-        # Look for last event (markwhen format: YYYY-MM-DDTHH:MM:SS: App Name)
-        # or old format: # App Name - (HH:MM:SS)
-        last_app = None
-        for i in range(len(lines) - 1, start_idx - 1, -1):
-            line = lines[i].strip()
-            # Check for markwhen format: YYYY-MM-DDTHH:MM:SS: App Name
-            if ":" in line and ("T" in line or line.startswith("#")):
-                # Try to parse markwhen format
-                if "T" in line:
-                    parts = line.split(":", 1)
-                    if len(parts) == 2:
-                        last_app = parts[1].strip()
-                        break
-                # Try old format: # App Name - (HH:MM:SS)
-                elif line.startswith("#"):
-                    # Extract app name from "# App Name - (HH:MM:SS)"
-                    app_part = line[1:].strip()
-                    if " - (" in app_part:
-                        last_app = app_part.split(" - (")[0].strip()
-                    else:
-                        last_app = app_part
-                    break
-        
-        return last_app
+        return markwhen_parser.parse_last_event(log_file)
     except Exception as e:
         NSLog(f"Error parsing last event: {e}")
         return None
@@ -203,25 +167,8 @@ def append_or_create_event(app_name, typed_content, timestamp):
     Always uses the current day's log file."""
     # Always get the current day's file (handles day transitions)
     log_file = get_log_file()
-    ensure_log_file_frontmatter(log_file)
-    
-    last_app = parse_last_event(log_file)
-    
-    # Format timestamp in markwhen format: YYYY-MM-DDTHH:MM:SS
-    timestamp_str = timestamp.strftime('%Y-%m-%dT%H:%M:%S')
-    
     try:
-        with open(log_file, "a", encoding="utf-8") as f:
-            if last_app == app_name:
-                # Append to existing entry
-                if typed_content.strip():
-                    f.write(typed_content)
-            else:
-                # Create new entry
-                f.write(f"{timestamp_str}: {app_name}\n")
-                if typed_content.strip():
-                    f.write(f"{typed_content}\n")
-                f.write("\n")
+        markwhen_parser.append_event(log_file, app_name, timestamp, typed_content)
     except Exception as e:
         NSLog(f"Error writing to log file {log_file}: {e}")
 
